@@ -1,0 +1,110 @@
+
+# BMS Testing and Validation
+
+## 1. Purpose
+
+This document records the testing and validation
+status of the Cost-Effective Smart Battery
+Management System project.
+
+The objective is to distinguish implemented
+features, verified results, and functions
+requiring further testing.
+
+---
+
+## 2. System Under Test
+
+| Parameter | Description |
+|---|---|
+| Battery Configuration | 3S3P Lithium-Ion |
+| Nominal Pack Voltage | 11.1 V |
+| Design Capacity | 7.5 Ah (unverified) |
+| Microcontroller | ESP32-S3-WROOM |
+| Temperature Sensor | DHT11 in monitoring firmware |
+| Voltage Sensing | ADC and resistor-divider design |
+| Current Sensing | ACS712 in hardware design |
+| Firmware | BMS_Monitoring_Safe.ino |
+
+---
+
+## 3. Firmware Verification
+
+| Test | Status |
+|---|---|
+| Arduino IDE compilation | Passed (developer-reported) |
+| ESP32 hardware upload | Not yet documented |
+| Wi-Fi access point operation | Not yet documented |
+| Web dashboard operation | Not yet documented |
+| DHT11 temperature measurement | Not yet documented |
+| Battery-voltage measurement | Disabled pending verification |
+| JSON data transmission | Not yet documented |
+
+Note: Compilation success does not establish
+correct physical hardware operation.
+
+---
+
+## 4. Hardware Validation
+
+| Function | Validation Status |
+|---|---|
+| Cell-group voltage accuracy | Pending |
+| Current measurement accuracy | Pending |
+| Temperature measurement accuracy | Pending |
+| Active cell balancing | Pending |
+| Overvoltage protection | Pending |
+| Overcurrent protection | Pending |
+| Overtemperature protection | Pending |
+| Relay disconnection | Pending |
+
+The academic project report discusses these
+functions, but complete quantitative validation
+data is not available for every function.
+
+---
+
+## 5. Testing Evidence
+
+Future test documentation should include:
+
+- Test objective
+- Equipment used
+- Circuit configuration
+- Test procedure
+- Reference measurements
+- Measured results
+- Observations
+- Pass/fail criteria
+
+Original prototype photographs and circuit
+diagrams are available in the main repository.
+
+---
+
+## 6. Known Limitations
+
+- Battery capacity has not been independently
+  verified through a discharge-capacity test.
+- The original report contains conflicting
+  battery specifications.
+- Battery voltage acquisition is disabled
+  in the revised monitoring firmware.
+- The revised firmware does not implement
+  charging control or protective disconnection.
+- Hardware validation of the revised firmware
+  remains pending.
+
+---
+
+## 7. Safety Notice
+
+This is an educational engineering prototype.
+
+The monitoring firmware is not a certified
+Battery Management System and must not be
+used as the sole protection mechanism for
+a lithium-ion battery.
+
+Live battery fault testing requires appropriate
+equipment, protection, and supervision.
