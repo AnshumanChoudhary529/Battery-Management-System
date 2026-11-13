@@ -1,0 +1,225 @@
+
+/*
+  3S3P BMS MONITORING DEMONSTRATOR - ESP32-S3
+  -------------------------------------------------------
+  Monitoring only. NOT a battery management or safety system.
+  No balancing, overcurrent/overvoltage cutoff, charger control,
+  or relay control is implemented.
+
+  Runs a private local Wi-Fi access point with a new random
+  password every boot. No home Wi-Fi credentials are stored.
+
+  The three optional voltage channels are for CUMULATIVE taps
+  from a 3S pack (tap1, tap2, tap3), NOT 9 independent cells.
+  Inputs are DISABLED by default until hardware is validated.
+
+  Do not wire a live battery based on this sketch alone.
+  Have the sensing interface reviewed and bench-tested first.
+*/
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DHT.h>
+#include <esp_system.h>
+#include <math.h>
+
+// -------------------- Settings --------------------
+constexpr bool ENABLE_BATTERY_VOLTAGE_INPUTS = false;
+constexpr uint8_t DHT_PIN = 13;
+constexpr uint8_t DHT_TYPE = DHT11;
+
+// ADC1 GPIOs on ESP32-S3. Only used when inputs enabled.
+constexpr uint8_t TAP_PINS[3] = {1, 2, 3};
+
+// DOCUMENTED divider values. Confirm AS-BUILT hardware!
+// Each cumulative tap needs its own properly protected divider.
+constexpr float R_TOP = 33000.0f;
+constexpr float R_BOTTOM = 10000.0f;
+constexpr float DIVIDER_GAIN = (R_TOP + R_BOTTOM) / R_BOTTOM;
+
+constexpr unsigned long SAMPLE_INTERVAL_MS = 2500;
+constexpr char AP_NAME[] = "BMS-Lab-Monitor";
+
+DHT dht(DHT_PIN, DHT_TYPE);
+WebServer server(80);
+
+float temperatureC = NAN;
+float groupV[3] = {NAN, NAN, NAN};
+float packV = NAN;
+bool voltageValid = false;
+unsigned long lastSample = 0;
+
+// -------------------- Dashboard --------------------
+const char PAGE[] PROGMEM = R"HTML(
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMS Lab Monitor</title>
+<style>
+  body{font-family:Arial,sans-serif;margin:0;background:#101827;color:#edf2f7}
+  main{max-width:750px;margin:32px auto;padding:0 18px}
+  h1{font-size:26px;margin-bottom:8px}
+  .warn{background:#593a12;border:1px solid #a67926;padding:14px;
+        border-radius:8px;margin:15px 0;line-height:1.5}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+  .tile{background:#202d40;border-radius:9px;padding:18px}
+  .label{color:#b9c8db;font-size:13px;margin-bottom:10px}
+  .value{font-size:24px;font-weight:bold}
+  small{color:#b9c8db}
+</style>
+</head>
+<body><main>
+<h1>3S Battery Monitoring Lab</h1>
+<p>ESP32-S3 local dashboard</p>
+<div class="warn"><strong>MONITOR ONLY.</strong> No cell balancing,
+no charging control, and no fault cutoff. Do not use as a battery safety device.</div>
+<p id="state">Connecting to monitor...</p>
+<div class="grid">
+ <div class="tile"><div class="label">Ambient temperature (DHT11)</div><div class="value" id="temp">--</div></div>
+ <div class="tile"><div class="label">Pack voltage</div><div class="value" id="pack">--</div></div>
+ <div class="tile"><div class="label">Series group 1</div><div class="value" id="g1">--</div></div>
+ <div class="tile"><div class="label">Series group 2</div><div class="value" id="g2">--</div></div>
+ <div class="tile"><div class="label">Series group 3</div><div class="value" id="g3">--</div></div>
+</div>
+<p><small>"--" means no valid reading. This page is not proof of BMS protection.</small></p>
+<script>
+const show=(v,unit='')=>typeof v==='number' && Number.isFinite(v)
+  ? v.toFixed(2)+unit : '--';
+async function update(){
+  try{
+    const response=await fetch('/data',{cache:'no-store'});
+    if(!response.ok) throw new Error('Server error');
+    const d=await response.json();
+    document.getElementById('temp').textContent=show(d.temperature_c,' °C');
+    document.getElementById('pack').textContent=show(d.pack_v,' V');
+    for(let i=1;i<=3;i++)
+      document.getElementById('g'+i).textContent=show(d['group_'+i+'_v'],' V');
+    document.getElementById('state').textContent=d.status;
+  }catch(e){document.getElementById('state').textContent='Connection interrupted';}
+}
+update(); setInterval(update,2500);
+</script></main></body></html>
+)HTML";
+
+// -------------------- Sensor measurements --------------------
+float averagePinVolts(uint8_t pin) {
+  uint32_t totalMillivolts = 0;
+  constexpr int SAMPLES = 12;
+  for (int n = 0; n < SAMPLES; n++) {
+    totalMillivolts += analogReadMilliVolts(pin);
+    delay(3);
+  }
+  float adcVolts = (totalMillivolts / float(SAMPLES)) / 1000.0f;
+  return adcVolts * DIVIDER_GAIN;
+}
+
+void sampleSensors() {
+  float newTemp = dht.readTemperature();
+  temperatureC = isnan(newTemp) ? NAN : newTemp;
+
+  voltageValid = false;
+  packV = NAN;
+  for (float &v : groupV) v = NAN;
+  if (!ENABLE_BATTERY_VOLTAGE_INPUTS) return;
+
+  // Three CUMULATIVE potentials relative to pack negative.
+  const float t1 = averagePinVolts(TAP_PINS[0]);
+  const float t2 = averagePinVolts(TAP_PINS[1]);
+  const float t3 = averagePinVolts(TAP_PINS[2]);
+
+  const float g1 = t1;
+  const float g2 = t2 - t1;
+  const float g3 = t3 - t2;
+
+  // Sanity validation, NOT a protective cutoff or fault response.
+  if (!isfinite(g1) || !isfinite(g2) || !isfinite(g3) ||
+      g1 < 0.2f || g2 < 0.2f || g3 < 0.2f ||
+      g1 > 4.5f || g2 > 4.5f || g3 > 4.5f) {
+    Serial.println("Invalid tap readings; voltage display suppressed.");
+    return;
+  }
+
+  groupV[0] = g1;
+  groupV[1] = g2;
+  groupV[2] = g3;
+  packV = t3;    // Not the sum of 9 parallel-cell readings.
+  voltageValid = true;
+}
+
+// -------------------- HTTP handlers --------------------
+void sendDashboard() {
+  server.send_P(200, "text/html", PAGE);
+}
+
+String numberOrNull(float v) {
+  return isfinite(v) ? String(v, 3) : String("null");
+}
+
+void sendData() {
+  String status;
+  if (!ENABLE_BATTERY_VOLTAGE_INPUTS)
+    status = "Battery inputs disabled until hardware is verified";
+  else if (!voltageValid)
+    status = "Battery voltage measurement unavailable or invalid";
+  else
+    status = "Monitoring only - voltage measurements are not protection";
+
+  String json = "{\"temperature_c\":" + numberOrNull(temperatureC);
+  json += ",\"pack_v\":" + numberOrNull(packV);
+  json += ",\"group_1_v\":" + numberOrNull(groupV[0]);
+  json += ",\"group_2_v\":" + numberOrNull(groupV[1]);
+  json += ",\"group_3_v\":" + numberOrNull(groupV[2]);
+  json += ",\"status\":\"" + status + "\"}";
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", json);
+}
+
+// -------------------- Setup and loop --------------------
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+  dht.begin();
+
+  if (ENABLE_BATTERY_VOLTAGE_INPUTS) {
+    for (uint8_t pin : TAP_PINS) {
+      pinMode(pin, INPUT); // Do NOT enable internal pulldowns on ADC taps.
+      analogSetPinAttenuation(pin, ADC_11db);
+    }
+  }
+
+  WiFi.mode(WIFI_AP);
+  // Create a fresh random access-point password at each boot.
+  char apPassword[17];
+  snprintf(apPassword, sizeof(apPassword), "%08lX%08lX",
+           (unsigned long)esp_random(), (unsigned long)esp_random());
+  if (!WiFi.softAP(AP_NAME, apPassword)) {
+    Serial.println("Could not start Wi-Fi access point.");
+    return;
+  }
+
+  server.on("/", HTTP_GET, sendDashboard);
+  server.on("/data", HTTP_GET, sendData);
+  server.onNotFound([](){server.send(404, "text/plain", "Not found");});
+  server.begin();
+
+  Serial.println("\nBMS MONITORING DEMO (NOT BATTERY PROTECTION)");
+  Serial.print("Wi-Fi network: "); Serial.println(AP_NAME);
+  Serial.print("Wi-Fi password: "); Serial.println(apPassword);
+  Serial.print("Dashboard URL: http://"); Serial.println(WiFi.softAPIP());
+  Serial.println("Battery taps disabled by default.");
+
+  sampleSensors();
+  lastSample = millis();
+}
+
+void loop() {
+  server.handleClient();
+  if (millis() - lastSample >= SAMPLE_INTERVAL_MS) {
+    lastSample = millis();
+    sampleSensors();
+  }
+  delay(2);
+}
