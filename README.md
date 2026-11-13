@@ -278,6 +278,25 @@ The monitoring firmware was developed using the Arduino environment for the ESP3
 
 The included firmware demonstrates monitoring functionality. Separate validation is required for the balancing-control and protection functions described in the hardware architecture.
 
+### Source Code
+
+The revised ESP32-S3 monitoring firmware is available here:
+
+[View BMS Monitoring Firmware](firmware/BMS_Monitoring_Safe.ino)
+
+**Firmware status:** Compiles successfully for the selected
+ESP32-S3 Arduino environment. Hardware validation pending.
+
+**Implemented in this firmware:**
+- DHT11 temperature monitoring
+- Local Wi-Fi web dashboard
+- JSON-based sensor data
+- Optional 3S voltage measurement logic
+
+**Important:** Battery-voltage acquisition is disabled by default.
+This firmware does not implement active cell balancing,
+overcurrent protection, overvoltage cutoff, or thermal shutdown.
+
 ---
 
 ## 11. Web-Based Battery Monitoring
