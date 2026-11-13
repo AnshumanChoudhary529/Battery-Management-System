@@ -357,6 +357,32 @@ The project report also contains photographs of the physical BMS setup and PCB h
 7. Hardware assembly
 8. Testing and observation
 
+
+### BMS Circuit Schematic
+
+The following schematic illustrates the electronic
+circuit design developed using EasyEDA.
+
+![BMS Circuit Schematic](EasyEDA_SCHEMATIC.jpeg)
+
+### PCB Layout Design
+
+The PCB layout was developed using EasyEDA.
+
+![PCB Layout](Layout%20Design.jpeg)
+
+### Physical PCB Development
+
+The following photographs document the physical
+PCB development and implementation.
+
+![PCB Hardware](PCB_1.jpeg)
+
+### Copper-Clad Board
+
+![Copper-Clad Board](Copper_Clad_Boards.jpeg)
+
+
 ---
 
 ## 14. Project Results
